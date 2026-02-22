@@ -1,7 +1,5 @@
 youtube-transcript-api==0.6.3
 yt-dlp==2024.12.23
-google-api-python-client==2.155.0
-python-dotenv==1.0.1
 
 # Data processing
 pandas==2.2.3

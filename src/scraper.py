@@ -2,57 +2,35 @@
 Fetches all video IDs and transcripts from the 49W YouTube channel.
 
 Usage:
-    python src/scraper.py --channel-id UC... --output data/raw/
-    python src/scraper.py --channel-id UC... --output data/raw/ --limit 50
+    python src/scraper.py --output data/raw/
+    python src/scraper.py --output data/raw/ --limit 50
+    python src/scraper.py --channel-url https://www.youtube.com/@49W --output data/raw/
 """
 
-import os
 import json
 import time
 import argparse
+import subprocess
 from pathlib import Path
 
-from dotenv import load_dotenv
-from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 from tqdm import tqdm
 
-load_dotenv()
+DEFAULT_CHANNEL_URL = "https://www.youtube.com/@49W"
 
 
-def get_all_video_ids(api_key: str, channel_id: str) -> list[dict]:
-    """Fetch all video IDs and titles from a channel using YouTube Data API v3."""
-    youtube = build("youtube", "v3", developerKey=api_key)
+def get_all_videos(channel_url: str) -> list[dict]:
+    """Fetch all video IDs and titles using yt-dlp (no API key needed)."""
+    print(f"Fetching video list from: {channel_url}")
+    result = subprocess.run(
+        ["yt-dlp", "--flat-playlist", "--print", "%(id)s\t%(title)s", f"{channel_url}/videos"],
+        capture_output=True, text=True
+    )
     videos = []
-    next_page_token = None
-
-    print(f"Fetching video list from channel: {channel_id}")
-
-    while True:
-        request = youtube.search().list(
-            part="id,snippet",
-            channelId=channel_id,
-            maxResults=50,
-            pageToken=next_page_token,
-            type="video",
-            order="date",
-        )
-        response = request.execute()
-
-        for item in response["items"]:
-            videos.append({
-                "video_id": item["id"]["videoId"],
-                "title": item["snippet"]["title"],
-                "published_at": item["snippet"]["publishedAt"],
-                "description": item["snippet"]["description"],
-            })
-
-        next_page_token = response.get("nextPageToken")
-        if not next_page_token:
-            break
-
-        time.sleep(0.5)  # respect rate limits
-
+    for line in result.stdout.strip().splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            videos.append({"video_id": parts[0], "title": parts[1]})
     print(f"Found {len(videos)} videos")
     return videos
 
@@ -60,8 +38,8 @@ def get_all_video_ids(api_key: str, channel_id: str) -> list[dict]:
 def fetch_transcript(video_id: str, languages: list[str] = ["tr", "en"]) -> list[dict] | None:
     """Fetch transcript for a single video. Returns None if unavailable."""
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=languages)
-        return transcript
+        fetched = YouTubeTranscriptApi().fetch(video_id, languages=languages)
+        return [{"text": s.text, "start": s.start, "duration": s.duration} for s in fetched]
     except (NoTranscriptFound, TranscriptsDisabled):
         return None
     except Exception as e:
@@ -74,7 +52,7 @@ def transcript_to_text(transcript: list[dict]) -> str:
     return " ".join(segment["text"].strip() for segment in transcript)
 
 
-def scrape_channel(channel_id: str, api_key: str, output_dir: str, limit: int | None = None):
+def scrape_channel(channel_url: str, output_dir: str, limit: int | None = None):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -86,7 +64,7 @@ def scrape_channel(channel_id: str, api_key: str, output_dir: str, limit: int | 
         with open(videos_file) as f:
             videos = json.load(f)
     else:
-        videos = get_all_video_ids(api_key, channel_id)
+        videos = get_all_videos(channel_url)
         with open(videos_file, "w", encoding="utf-8") as f:
             json.dump(videos, f, ensure_ascii=False, indent=2)
 
@@ -115,8 +93,6 @@ def scrape_channel(channel_id: str, api_key: str, output_dir: str, limit: int | 
         record = {
             "video_id": vid_id,
             "title": video["title"],
-            "published_at": video["published_at"],
-            "description": video["description"],
             "transcript_raw": transcript,
             "transcript_text": transcript_to_text(transcript),
         }
@@ -132,18 +108,12 @@ def scrape_channel(channel_id: str, api_key: str, output_dir: str, limit: int | 
 
 def main():
     parser = argparse.ArgumentParser(description="Scrape 49W YouTube channel transcripts")
-    parser.add_argument("--channel-id", default=os.getenv("CHANNEL_ID"), help="YouTube channel ID")
-    parser.add_argument("--api-key", default=os.getenv("YOUTUBE_API_KEY"), help="YouTube Data API v3 key")
+    parser.add_argument("--channel-url", default=DEFAULT_CHANNEL_URL, help="YouTube channel URL")
     parser.add_argument("--output", default="data/raw", help="Output directory")
     parser.add_argument("--limit", type=int, default=None, help="Max number of videos to process")
     args = parser.parse_args()
 
-    if not args.channel_id:
-        raise ValueError("Channel ID required. Set CHANNEL_ID in .env or pass --channel-id.")
-    if not args.api_key:
-        raise ValueError("API key required. Set YOUTUBE_API_KEY in .env or pass --api-key.")
-
-    scrape_channel(args.channel_id, args.api_key, args.output, args.limit)
+    scrape_channel(args.channel_url, args.output, args.limit)
 
 
 if __name__ == "__main__":
