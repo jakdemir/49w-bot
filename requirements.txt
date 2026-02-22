@@ -1,0 +1,19 @@
+youtube-transcript-api==0.6.3
+yt-dlp==2024.12.23
+google-api-python-client==2.155.0
+python-dotenv==1.0.1
+
+# Data processing
+pandas==2.2.3
+tqdm==4.67.1
+
+# Fine-tuning
+torch>=2.1.0
+transformers==4.47.1
+datasets==3.2.0
+peft==0.14.0
+trl==0.13.0
+bitsandbytes==0.45.0
+accelerate==1.2.1
+sentencepiece==0.2.0
+protobuf==5.29.2
